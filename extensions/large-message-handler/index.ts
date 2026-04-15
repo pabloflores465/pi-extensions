@@ -24,7 +24,7 @@ interface LargeMessageSettings {
 }
 
 const DEFAULT_SETTINGS: Required<LargeMessageSettings> = {
-	maxTokens: 80000,  // Keep well under 200k context to leave room for session
+	maxTokens: 100000,  // Keep well under 200k context to leave room for session
 	enabled: true,
 };
 
