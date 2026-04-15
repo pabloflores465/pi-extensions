@@ -1,0 +1,26 @@
+{
+  "lastChangelogVersion": "0.67.2",
+  "defaultProvider": "openrouter",
+  "defaultModel": "minimax/minimax-m2.7",
+  "defaultThinkingLevel": "high",
+  "transport": "websocket",
+  "compaction": {
+    "enabled": true,
+    "keepRecentTokens": 5000
+  },
+  "steeringMode": "one-at-a-time",
+  "extensions": [
+    "/Users/pabloflores/.pi/agent/extensions/batch-summarizer/index.ts",
+    "/Users/pabloflores/.pi/agent/extensions/large-message-handler/index.ts"
+  ],
+  "large-message-handler": {
+    "enabled": true,
+    "maxTokens": 50000
+  },
+  "batch-summarizer": {
+    "summarizationModel": "google/gemini-3.1-flash-lite-preview",
+    "threshold": 0.8,
+    "maxSummaryTokens": 65500,
+    "batchThreshold": 750000
+  }
+}
