@@ -273,8 +273,14 @@ export default function (pi: ExtensionAPI) {
 			clearTimeout(errorTimeoutId);
 			errorTimeoutId = null;
 		}
-		startThinkingSpinner(ctx);
-		transitionToWorking(ctx);
+		// If we were in error state, reset to working; otherwise start fresh
+		if (currentState === "error" || currentState === "done") {
+			currentState = "working";
+			updateStatusBar(ctx);
+		} else {
+			startThinkingSpinner(ctx);
+			transitionToWorking(ctx);
+		}
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
