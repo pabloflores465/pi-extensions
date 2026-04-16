@@ -12,6 +12,6 @@
   "steeringMode": "one-at-a-time",
   "extensions": [
     "/Users/pabloflores/.pi/agent/extensions/colon-quit.ts",
-    "/Users/pabloflores/.pi/agent/extensions/message-handler/index.ts"
+    "/Users/pabloflores/.pi/agent/extensions/large-message-handler.ts"
   ]
 }

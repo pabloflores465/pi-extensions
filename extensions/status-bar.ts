@@ -30,6 +30,7 @@ export default function (pi: ExtensionAPI) {
 	let workFrame = 0;
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 	let workingTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	let errorTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 	function clearSpinner() {
 		if (intervalId) {
@@ -268,6 +269,10 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Agent loop
 	pi.on("agent_start", async (_event, ctx) => {
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
+		}
 		startThinkingSpinner(ctx);
 		transitionToWorking(ctx);
 	});
@@ -284,6 +289,10 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Tool execution
 	pi.on("tool_execution_start", async (_event, ctx) => {
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
+		}
 		if (currentState === "thinking") {
 			showWorking(ctx);
 		} else if (currentState === "sleeping") {
@@ -301,8 +310,16 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_execution_end", async (event, ctx) => {
 		if (event.isError) {
 			showError(ctx, `${event.toolName} failed`);
+			// Reset to sleeping after 4 seconds if no new work starts
+			if (errorTimeoutId) clearTimeout(errorTimeoutId);
+			errorTimeoutId = setTimeout(() => {
+				if (currentState === "error") {
+					showSleeping(ctx);
+				}
+			}, 4000);
 			return;
 		}
+
 
 		if (currentState === "working") {
 			showThinking(ctx);
