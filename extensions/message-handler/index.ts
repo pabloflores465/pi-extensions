@@ -2,21 +2,22 @@
  * Large Message Handler Extension
  *
  * Automatically handles oversized user messages by:
- * 1. Saving long messages to a temp file
+ * 1. Saving long messages to a temp file in the agent's session directory
  * 2. Replacing the message with a /read command
  * 3. The model then reads the file normally
  *
  * This prevents context overflow when sending large content like HTML pages.
+ * 
+ * Files are saved to the session directory so the model can access them.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const DEFAULT_MAX_TOKENS = 100000; // Max tokens before splitting (leave room for context)
 const TEMP_FILE_PREFIX = "pi-large-msg-";
-const TEMP_FILE_DIR = "pi-large-messages";
+const TEMP_FILE_DIR = "large-messages";
 
 interface LargeMessageSettings {
 	maxTokens?: number;  // Max tokens before saving to file
@@ -27,10 +28,6 @@ const DEFAULT_SETTINGS: Required<LargeMessageSettings> = {
 	maxTokens: 100000,  // Keep well under 200k context to leave room for session
 	enabled: true,
 };
-
-function getTempDir(): string {
-	return join(tmpdir(), TEMP_FILE_DIR);
-}
 
 function estimateTokens(text: string): number {
 	// Rough estimate: 1 token ≈ 4 characters
@@ -58,58 +55,34 @@ function extractTextFromContent(content: unknown): string {
 	return String(content);
 }
 
-async function saveToTempFile(content: string): Promise<string> {
-	// Create temp directory if it doesn't exist
-	const tempDir = getTempDir();
-	await mkdir(tempDir, { recursive: true });
+function getMessagesDir(pi: ExtensionAPI): string {
+	// Use the session directory if available, otherwise use cwd
+	return pi.sessionDir || process.cwd();
+}
+
+async function saveToTempFile(content: string, pi: ExtensionAPI): Promise<string> {
+	// Create messages directory in the session directory
+	const messagesDir = join(getMessagesDir(pi), TEMP_FILE_DIR);
+	await mkdir(messagesDir, { recursive: true });
 
 	// Generate unique filename
 	const timestamp = Date.now();
 	const random = Math.random().toString(36).substring(2, 8);
 	const filename = `${TEMP_FILE_PREFIX}${timestamp}-${random}.txt`;
-	const filepath = join(tempDir, filename);
+	const filepath = join(messagesDir, filename);
 
 	// Save content
 	await writeFile(filepath, content, "utf-8");
 
-	console.log(`[large-msg] Saved ${content.length} chars to ${filename}`);
+	console.log(`[large-msg] Saved ${content.length} chars to ${filepath}`);
 
-	return filename;
-}
-
-async function handleLargeMessage(
-	content: unknown,
-	maxTokens: number,
-	readCommand: string
-): Promise<unknown> {
-	const text = extractTextFromContent(content);
-	const tokens = estimateTokens(text);
-
-	console.log(`[large-msg] Content: ${text.length} chars, ~${tokens} tokens, limit: ${maxTokens}`);
-
-	if (tokens <= maxTokens) {
-		console.log(`[large-msg] Content fits, no action needed`);
-		return null; // No changes needed
-	}
-
-	// Save to temp file
-	const filename = await saveToTempFile(text);
-
-	// Return a modified message that reads the file
-	return {
-		content: [
-			{
-				type: "text" as const,
-				text: `${readCommand} ${filename}\n\n[Note: Large message saved to file, reading it now...]`,
-			},
-		],
-	};
+	return filepath;
 }
 
 export default function (pi: ExtensionAPI) {
 	console.log("[large-msg] Extension loaded!");
 
-	pi.on("input", async (event, ctx) => {
+	pi.on("input", async (event) => {
 		// Get settings
 		const extSettings = pi.settings?.["large-message-handler"] as LargeMessageSettings | undefined;
 		const settings: Required<LargeMessageSettings> = {
@@ -126,14 +99,15 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const tokens = estimateTokens(event.text);
+		const text = extractTextFromContent(event.text);
+		const tokens = estimateTokens(text);
 		const currentModel = pi.model;
 		const contextWindow = currentModel?.contextWindow || 200000;
 		// Calculate how much room we need to leave for session context
 		const roomForContext = Math.floor(contextWindow * 0.5); // Leave 50% for session
 		const effectiveMaxTokens = Math.min(settings.maxTokens, roomForContext);
 
-		console.log(`[large-msg] Input: ${event.text.length} chars, ~${tokens} tokens`);
+		console.log(`[large-msg] Input: ${text.length} chars, ~${tokens} tokens`);
 		console.log(`[large-msg] Model context: ${contextWindow}, room for input: ${effectiveMaxTokens}`);
 
 		if (tokens <= effectiveMaxTokens) {
@@ -141,28 +115,18 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		console.log(`[large-msg] Content too large, saving to temp file...`);
+		console.log(`[large-msg] Content too large, saving to session directory...`);
 
 		try {
-			const newContent = await handleLargeMessage(
-				event.text,
-				effectiveMaxTokens,
-				"/read"
-			);
+			const filepath = await saveToTempFile(text, pi);
+			const relativePath = filepath.replace(process.cwd() + "/", "");
 
-			if (newContent) {
-				// We need to modify the input to use the file instead
-				// Since we can't directly modify the event, we'll use a different approach:
-				// Transform the input to a /read command
-				const filename = await saveToTempFile(event.text);
+			console.log(`[large-msg] Replacing input with /read command for ${relativePath}`);
 
-				console.log(`[large-msg] Replacing input with /read command`);
-
-				return {
-					action: "transform",
-					text: "/read " + join(getTempDir(), filename) + "\n\n[Large message saved to file for context efficiency]",
-				};
-			}
+			return {
+				action: "transform",
+				text: `/read ${relativePath}\n\n[Large message (${text.length} chars, ~${tokens} tokens) saved to file for context efficiency. The file will be read automatically.]`,
+			};
 		} catch (error) {
 			console.error(`[large-msg] Error handling large message: ${error}`);
 		}
