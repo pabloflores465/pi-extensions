@@ -1,5 +1,5 @@
 /**
- * Secondary Status Bar Extension with Full-Width Status Bar
+ * Status Bar Extension with Full-Width Status Bar
  *
  * Layout: status | [.......filler.......] | extensions + skills
  * - Status al principio (sleeping/thinking/working/done/error)
