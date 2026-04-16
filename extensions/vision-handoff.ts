@@ -196,12 +196,9 @@ export default function (pi: ExtensionAPI) {
       return { action: "continue" };
     }
 
-    // Find the multimodal model - FORCE openrouter provider
+    // Find the multimodal model
     const visionProviders = [
       { provider: "openrouter", id: "google/gemini-3.1-flash-lite-preview" },
-      { provider: "openrouter", id: "meta-llama/llama-3.2-11b-vision-instruct" },
-      { provider: "openrouter", id: "qwen/qwen2.5-vl-32b-instruct" },
-      { provider: "openrouter", id: "nvidia/nemotron-nano-12b-v2-vl" },
     ];
 
     let multimodalModel: Model | undefined;

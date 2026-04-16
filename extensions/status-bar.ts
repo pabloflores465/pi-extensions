@@ -273,24 +273,27 @@ export default function (pi: ExtensionAPI) {
 			clearTimeout(errorTimeoutId);
 			errorTimeoutId = null;
 		}
-		// If we were in error state, reset to working; otherwise start fresh
-		if (currentState === "error" || currentState === "done") {
-			currentState = "working";
-			updateStatusBar(ctx);
-		} else {
+		// If sleeping, start fresh; otherwise keep current state
+		if (currentState === "sleeping") {
 			startThinkingSpinner(ctx);
 			transitionToWorking(ctx);
 		}
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		if (currentState === "thinking" || currentState === "working") {
+		// Final transition: show done → sleeping
+		if (currentState !== "sleeping") {
 			showDone(ctx);
-
 			setTimeout(() => {
 				showSleeping(ctx);
 			}, 1500);
 		}
+	});
+
+	// ── Turn end - refresh
+	pi.on("turn_end", async (_event, ctx) => {
+		// Refresh status bar on turn end
+		updateStatusBar(ctx);
 	});
 
 	// ── Tool execution
@@ -299,12 +302,8 @@ export default function (pi: ExtensionAPI) {
 			clearTimeout(errorTimeoutId);
 			errorTimeoutId = null;
 		}
-		if (currentState === "thinking") {
-			showWorking(ctx);
-		} else if (currentState === "sleeping") {
-			startThinkingSpinner(ctx);
-			transitionToWorking(ctx);
-		}
+		// Any state goes to working when tool starts
+		showWorking(ctx);
 	});
 
 	pi.on("tool_execution_update", async (_event, ctx) => {
@@ -314,22 +313,19 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
-		if (event.isError) {
-			showError(ctx, `${event.toolName} failed`);
-			// Reset to sleeping after 4 seconds if no new work starts
-			if (errorTimeoutId) clearTimeout(errorTimeoutId);
-			errorTimeoutId = setTimeout(() => {
-				if (currentState === "error") {
-					showSleeping(ctx);
-				}
-			}, 4000);
-			return;
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
 		}
-
-
-		if (currentState === "working") {
-			showThinking(ctx);
-		}
+		
+		// Show done briefly, then go to thinking (agent will continue)
+		showDone(ctx);
+		
+		errorTimeoutId = setTimeout(() => {
+			if (currentState === "done") {
+				showThinking(ctx);
+			}
+		}, 500);
 	});
 
 	// ── Detect skill loading
