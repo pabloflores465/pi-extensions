@@ -104,7 +104,7 @@ function buildStatusBar(screenWidth: number): string {
 	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
 	const totalTokens = stats.inputTokens + stats.outputTokens;
 	const usedPercent = stats.maxContext > 0 ? ((totalTokens / stats.maxContext) * 100).toFixed(1) : "0.0";
-	const tokensPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
+	const tokensPart = `${usedPercent}%/${formatTokens(stats.maxContext)} ↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)} (auto)`;
 	const costPart = formatCost(stats.cost);
 	const pathPart = currentPath ? shortenPath(currentPath) : "";
 	const modelPart = `${modelName} • ${thinkingLevel}`;
