@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.67.6",
+  "lastChangelogVersion": "0.67.68",
   "defaultProvider": "openrouter",
-  "defaultModel": "qwen/qwen3.6-plus",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "minimax/minimax-m2.7",
+  "defaultThinkingLevel": "high",
   "transport": "websocket",
   "compaction": {
     "enabled": true,
@@ -17,6 +17,7 @@
     "/Users/pabloflores/.pi/agent/extensions/always-caveman.ts"
   ],
   "packages": [
+    "npm:pi-nvim",
     "npm:pi-better-ctx"
   ]
 }
