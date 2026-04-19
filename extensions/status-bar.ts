@@ -119,50 +119,9 @@ function formatRagChunks(chunks: number): string {
 	return `R${chunks}`;
 }
 
-function buildStatusBar(screenWidth: number): string {
-	// Minimal airline style: state | context% | ↑↓ tokens | RAG | $cost | branch | model • thinking
-	const statePart = `${getStateIcon()} ${getStateLabel()}`;
-	const totalTokens = stats.inputTokens + stats.outputTokens;
-	const usedPercent = stats.maxContext > 0 ? ((totalTokens / stats.maxContext) * 100).toFixed(1) : "0.0";
-	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
-	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}`;
-	const ragPart = ragChunks > 0 ? formatRagChunks(ragChunks) : "";
-	const costPart = formatCost(stats.cost);
-	const gitPart = gitBranch ? `${gitBranch}${gitStatus}` : "";
-	const modelPart = `${modelName} • ${thinkingLevel}`;
-	
-	// Only show essential parts
-	const parts: { text: string; priority: number }[] = [
-		{ text: statePart, priority: 1 },
-		{ text: contextPart, priority: 2 },
-		{ text: tokensPart, priority: 3 },
-		{ text: ragPart, priority: 4 },
-		{ text: costPart, priority: 5 },
-		{ text: gitPart, priority: 6 },
-		{ text: modelPart, priority: 7 },
-	].filter(p => p.text);
-	
-	let result = "";
-	let remaining = screenWidth;
-	
-	for (let i = 0; i < parts.length && remaining > 0; i++) {
-		const part = parts[i]!;
-		const separator = i > 0 ? " | " : "";
-		const sepLen = i > 0 ? 3 : 0;
-		
-		if (part.text.length + sepLen > remaining) {
-			const availForText = Math.max(0, remaining - sepLen);
-			if (availForText > 3) {
-				result += separator + part.text.slice(0, availForText);
-			}
-			break;
-		} else {
-			result += separator + part.text;
-			remaining -= part.text.length + sepLen;
-		}
-	}
-	
-	return result;
+function buildStatusBar(_screenWidth: number): string {
+	// Just the state: ○ sleeping | ◐ thinking | ◐ working | ✓ done
+	return `${getStateIcon()} ${getStateLabel()}`;
 }
 
 function updateStatusBar(ctx: ExtensionContext) {
