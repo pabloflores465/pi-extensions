@@ -1,7 +1,7 @@
 /**
  * Status Bar Extension - Neovim Lualine Style
  * 
- * Layout: [git] 0.0%/197k (auto) | path | model • thinking
+ * Layout: (branch) 0.0%/197k (auto) | path | model • thinking
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -11,14 +11,13 @@ import { homedir } from "node:os";
 
 const STATUS_BAR_ID = "status-bar";
 
-type State = "sleeping" | "thinking" | "working" | "done" | "error";
-
-let currentState: State = "sleeping";
 let currentPath = "";
 let gitBranch = "";
-let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
+let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000 };
 let modelName = "";
 let thinkingLevel = "";
+let isWorking = false;
+let isThinking = false;
 
 function formatTokens(tokens: number): string {
 	if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
@@ -26,24 +25,23 @@ function formatTokens(tokens: number): string {
 	return String(tokens);
 }
 
-function formatCost(cost: number): string {
-	if (cost < 0.001) return "$0";
-	if (cost < 1) return `$${cost.toFixed(3)}`;
-	return `$${cost.toFixed(2)}`;
-}
-
 function shortenPath(fullPath: string): string {
 	const home = homedir();
-	if (fullPath.startsWith(home)) {
-		return "~" + fullPath.slice(home.length);
+	let path = fullPath;
+	
+	if (path.startsWith(home)) {
+		path = "~" + path.slice(home.length);
 	}
-	// Shorten dirname
-	const dir = dirname(fullPath);
-	const base = basename(fullPath);
-	if (dir.length > 20) {
-		return ".../" + base;
+	
+	// Shorten if too long
+	if (path.length > 40) {
+		const base = basename(path);
+		const dir = dirname(path);
+		if (dir.length > 20) {
+			return ".../" + base;
+		}
 	}
-	return fullPath;
+	return path;
 }
 
 function buildStatusBar(screenWidth: number): string {
@@ -57,8 +55,10 @@ function buildStatusBar(screenWidth: number): string {
 		? `${gitBranch} ${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`
 		: `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
 	
-	// Center: current path
-	const center = currentPath ? ` ${shortenPath(currentPath)} ` : "";
+	// Center: current path (only if working/thinking)
+	const center = (isWorking || isThinking) && currentPath 
+		? ` ${shortenPath(currentPath)} `
+		: "";
 	
 	// Right: model • thinking
 	const right = modelName 
@@ -74,12 +74,11 @@ function buildStatusBar(screenWidth: number): string {
 	let result: string;
 	
 	if (screenWidth <= leftLen + rightLen + minGap) {
-		// Minimal: left + truncated right
 		result = left + " " + right.slice(0, Math.max(0, screenWidth - leftLen - 1));
 	} else if (screenWidth <= leftLen + centerLen + rightLen + minGap * 2) {
 		const availForCenter = screenWidth - leftLen - rightLen - minGap * 2;
-		const truncatedCenter = centerLen > availForCenter
-			? center.slice(0, Math.max(0, availForCenter))
+		const truncatedCenter = centerLen > availForCenter && availForCenter > 0
+			? center.slice(0, availForCenter)
 			: center;
 		result = left + " " + truncatedCenter + " ".repeat(minGap) + right;
 	} else {
@@ -102,10 +101,9 @@ function updateStatusBar(ctx: ExtensionContext) {
 				const screenWidth = width ?? tui.width ?? 120;
 				const statusText = buildStatusBar(screenWidth);
 				
-				let color = "accent";
-				if (currentState === "error") color = "red";
-				else if (currentState === "done") color = "green";
-				else if (currentState === "working") color = "yellow";
+				let color = "green";
+				if (isWorking) color = "yellow";
+				else if (isThinking) color = "accent";
 				
 				return [theme.fg(color, statusText)];
 			},
@@ -122,14 +120,12 @@ function updateStats(ctx: ExtensionContext) {
 				inputTokens: sessionStats.promptTokens || 0,
 				outputTokens: sessionStats.completionTokens || 0,
 				maxContext: sessionStats.maxContext || 200000,
-				cost: sessionStats.estimatedCost || 0,
 			};
 		}
 	} catch {
 		// Stats not available
 	}
 	
-	// Get model info
 	try {
 		const state = ctx.sessionManager.getSessionState?.();
 		if (state?.model) {
@@ -150,59 +146,59 @@ export default function (pi: ExtensionAPI) {
 		gitBranch = "";
 		modelName = "";
 		thinkingLevel = "";
-		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
+		isWorking = false;
+		isThinking = false;
+		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000 };
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
 
 	// ── Agent loop
 	pi.on("agent_start", async (_event, ctx) => {
-		currentState = "thinking";
+		isThinking = true;
+		isWorking = false;
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		currentState = "done";
+		isThinking = false;
+		isWorking = false;
 		updateStatusBar(ctx);
-		setTimeout(() => {
-			currentState = "sleeping";
-			updateStatusBar(ctx);
-		}, 1500);
 	});
 
 	// ── Tool execution
 	pi.on("tool_execution_start", async (_event, ctx) => {
-		currentState = "working";
+		isWorking = true;
+		isThinking = false;
 		updateStatusBar(ctx);
 	});
 
 	pi.on("tool_execution_end", async (_event, ctx) => {
-		currentState = "done";
+		isWorking = false;
+		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
 
-	// ── Update path from git commands
+	// ── Track file paths
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
-		// Track git branch
-		if (text.includes("git") && text.includes("branch")) {
-			const branchMatch = text.match(/current branch:?\s*(\S+)/i);
-			if (branchMatch) {
-				gitBranch = `(${branchMatch[1]})`;
-			}
+		// Extract file paths from commands
+		const readMatch = text.match(/^\/read\s+(\S+)/);
+		const editMatch = text.match(/^\/edit\s+(\S+)/);
+		const writeMatch = text.match(/^\/write\s+(\S+)/);
+		
+		const match = readMatch || editMatch || writeMatch;
+		if (match) {
+			currentPath = match[1]!;
+			updateStatusBar(ctx);
 		}
 		
-		// Track file paths from commands
-		const readMatch = text.match(/^\/read\s+(.+)/i);
-		const editMatch = text.match(/^\/edit\s+(.+)/i);
-		const writeMatch = text.match(/^\/write\s+(.+)/i);
-		const bashMatch = text.match(/\s(\/[^\s]+)/);
-		
-		const match = readMatch || editMatch || writeMatch || bashMatch;
-		if (match) {
-			currentPath = match[1]!.split(/\s/)[0]!;
+		// Track git branch
+		const branchMatch = text.match(/\(?(main|master|develop|HEAD)\)?/);
+		if (branchMatch && !gitBranch) {
+			gitBranch = `(${branchMatch[1]})`;
 			updateStatusBar(ctx);
 		}
 	});
@@ -225,7 +221,7 @@ export default function (pi: ExtensionAPI) {
 			updateStats(ctx);
 			const totalTokens = stats.inputTokens + stats.outputTokens;
 			ctx.ui.notify(
-				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}`,
+				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nModel: ${modelName} • ${thinkingLevel}`,
 				"info"
 			);
 		},
