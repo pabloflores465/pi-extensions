@@ -33,7 +33,6 @@ function shortenPath(fullPath: string): string {
 		path = "~" + path.slice(home.length);
 	}
 	
-	// Shorten if too long
 	if (path.length > 40) {
 		const base = basename(path);
 		const dir = dirname(path);
@@ -55,7 +54,7 @@ function buildStatusBar(screenWidth: number): string {
 		? `${gitBranch} ${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`
 		: `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
 	
-	// Center: current path (only if working/thinking)
+	// Center: current path only when working/thinking
 	const center = (isWorking || isThinking) && currentPath 
 		? ` ${shortenPath(currentPath)} `
 		: "";
@@ -65,7 +64,6 @@ function buildStatusBar(screenWidth: number): string {
 		? `${modelName} • ${thinkingLevel || "medium"}`
 		: "";
 	
-	// Calculate
 	const leftLen = left.length;
 	const rightLen = right.length;
 	const centerLen = center.length;
@@ -101,9 +99,10 @@ function updateStatusBar(ctx: ExtensionContext) {
 				const screenWidth = width ?? tui.width ?? 120;
 				const statusText = buildStatusBar(screenWidth);
 				
-				let color = "accent";
-				if (isWorking) color = "warning";
-				else if (isThinking) color = "muted";
+				// Use more visible colors
+				let color = "cyan";
+				if (isWorking) color = "yellow";
+				else if (isThinking) color = "white";
 				
 				return [theme.fg(color, statusText)];
 			},
@@ -149,6 +148,19 @@ export default function (pi: ExtensionAPI) {
 		isWorking = false;
 		isThinking = false;
 		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000 };
+		
+		// Get git branch from working directory
+		try {
+			const { execSync } = await import("node:child_process");
+			const cwd = process.cwd();
+			const branch = execSync("git branch --show-current 2>/dev/null || echo ''", { cwd, encoding: "utf8" }).trim();
+			if (branch && branch !== "(no branch)") {
+				gitBranch = `(${branch})`;
+			}
+		} catch {
+			// Git not available or not a git repo
+		}
+		
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
@@ -180,7 +192,7 @@ export default function (pi: ExtensionAPI) {
 		updateStatusBar(ctx);
 	});
 
-	// ── Track file paths
+	// ── Track file paths (but NOT branch from here)
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
@@ -192,13 +204,6 @@ export default function (pi: ExtensionAPI) {
 		const match = readMatch || editMatch || writeMatch;
 		if (match) {
 			currentPath = match[1]!;
-			updateStatusBar(ctx);
-		}
-		
-		// Track git branch
-		const branchMatch = text.match(/\(?(main|master|develop|HEAD)\)?/);
-		if (branchMatch && !gitBranch) {
-			gitBranch = `(${branchMatch[1]})`;
 			updateStatusBar(ctx);
 		}
 	});
