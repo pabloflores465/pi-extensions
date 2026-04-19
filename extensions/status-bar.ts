@@ -28,6 +28,7 @@ let gitStatus = "";
 let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 let modelName = "minimax/minimax-m2.7";
 let thinkingLevel = "high";
+let ragChunks = 0;
 
 function clearSpinner() {
 	if (intervalId) {
@@ -98,25 +99,49 @@ function getStateLabel(): string {
 	}
 }
 
+function getRagChunks(): number {
+	try {
+		const { readFileSync, existsSync } = require("node:fs");
+		const { join } = require("node:path");
+		const home = require("node:os").homedir();
+		const indexPath = join(home, ".pi", "openrouter-rag", "index.json");
+		if (existsSync(indexPath)) {
+			const data = JSON.parse(readFileSync(indexPath, "utf-8"));
+			return data.chunks?.length || 0;
+		}
+	} catch {}
+	return 0;
+}
+
+function formatRagChunks(chunks: number): string {
+	if (chunks >= 1000000) return `R${(chunks / 1000000).toFixed(1)}M`;
+	if (chunks >= 1000) return `R${(chunks / 1000).toFixed(1)}k`;
+	return `R${chunks}`;
+}
+
 function buildStatusBar(screenWidth: number): string {
 	// Build parts like airline
 	const statePart = `${getStateIcon()} ${getStateLabel()}`;
 	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
 	const totalTokens = stats.inputTokens + stats.outputTokens;
 	const usedPercent = stats.maxContext > 0 ? ((totalTokens / stats.maxContext) * 100).toFixed(1) : "0.0";
-	const tokensPart = `${usedPercent}%/${formatTokens(stats.maxContext)} ↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)} (auto)`;
+	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
+	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}`;
+	const ragPart = ragChunks > 0 ? formatRagChunks(ragChunks) : "";
 	const costPart = formatCost(stats.cost);
-	const pathPart = currentPath ? shortenPath(currentPath) : "";
+	const pathPart = currentPath ? `${shortenPath(currentPath)}${gitPart ? ` ${gitPart}` : ""}` : gitPart;
 	const modelPart = `${modelName} • ${thinkingLevel}`;
 	
 	// Combine parts with | separator, fitting as much as possible
+	// Priority: state(1) > context(2) > tokens(3) > rag(4) > cost(5) > path(6) > model(7)
 	const parts: { text: string; priority: number }[] = [
 		{ text: statePart, priority: 1 },
-		{ text: gitPart, priority: 2 },
+		{ text: contextPart, priority: 2 },
 		{ text: tokensPart, priority: 3 },
-		{ text: costPart, priority: 4 },
-		{ text: pathPart, priority: 5 },
-		{ text: modelPart, priority: 5 },
+		{ text: ragPart, priority: 4 },
+		{ text: costPart, priority: 5 },
+		{ text: pathPart, priority: 6 },
+		{ text: modelPart, priority: 7 },
 	].filter(p => p.text);
 	
 	let result = "";
@@ -250,6 +275,7 @@ export default function (pi: ExtensionAPI) {
 		gitStatus = "";
 		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 		currentState = "sleeping";
+		ragChunks = getRagChunks();
 		
 		getGitInfo();
 		updateStats(ctx);
