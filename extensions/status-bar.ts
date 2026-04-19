@@ -1,85 +1,71 @@
 /**
  * Status Bar Extension - Neovim Lualine Style
  * 
- * Layout: [mode] path | tokens cost
- * Clean, minimal, informative
+ * Layout: [git] 0.0%/197k (auto) | path | model • thinking
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
+import { homedir } from "node:os";
 
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const WORK_FRAMES = ["◐", "◓", "◑", "◒"];
 const STATUS_BAR_ID = "status-bar";
 
 type State = "sleeping" | "thinking" | "working" | "done" | "error";
 
 let currentState: State = "sleeping";
-let spinnerFrame = 0;
-let workFrame = 0;
-let intervalId: ReturnType<typeof setInterval> | null = null;
-let workingTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let errorTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentPath = "";
-let stats = { inputTokens: 0, outputTokens: 0, cost: 0 };
-
-function clearSpinner() {
-	if (intervalId) {
-		clearInterval(intervalId);
-		intervalId = null;
-	}
-	if (workingTimeoutId) {
-		clearTimeout(workingTimeoutId);
-		workingTimeoutId = null;
-	}
-}
-
-function getSpinner(): string {
-	return SPINNER_FRAMES[spinnerFrame]!;
-}
-
-function getWorkSpinner(): string {
-	return WORK_FRAMES[workFrame]!;
-}
-
-function getStateIcon(state: State): string {
-	switch (state) {
-		case "sleeping": return "○";
-		case "thinking": return getSpinner();
-		case "working": return getWorkSpinner();
-		case "done": return "✓";
-		case "error": return "✗";
-	}
-}
-
-function formatCost(cost: number): string {
-	if (cost < 0.001) return "$0.00";
-	if (cost < 1) return `$${cost.toFixed(4)}`;
-	return `$${cost.toFixed(2)}`;
-}
+let gitBranch = "";
+let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
+let modelName = "";
+let thinkingLevel = "";
 
 function formatTokens(tokens: number): string {
 	if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-	if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+	if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
 	return String(tokens);
 }
 
+function formatCost(cost: number): string {
+	if (cost < 0.001) return "$0";
+	if (cost < 1) return `$${cost.toFixed(3)}`;
+	return `$${cost.toFixed(2)}`;
+}
+
+function shortenPath(fullPath: string): string {
+	const home = homedir();
+	if (fullPath.startsWith(home)) {
+		return "~" + fullPath.slice(home.length);
+	}
+	// Shorten dirname
+	const dir = dirname(fullPath);
+	const base = basename(fullPath);
+	if (dir.length > 20) {
+		return ".../" + base;
+	}
+	return fullPath;
+}
+
 function buildStatusBar(screenWidth: number): string {
-	const stateIcon = getStateIcon(currentState);
-	const stateLabel = currentState === "sleeping" ? "idle" : currentState;
-	
-	// Left section: mode icon + state
-	const left = `${stateIcon} ${stateLabel}`;
-	
-	// Center section: current path (if available)
-	const center = currentPath ? ` ${currentPath} ` : "";
-	
-	// Right section: tokens | cost
 	const totalTokens = stats.inputTokens + stats.outputTokens;
-	const right = `tokens:${formatTokens(totalTokens)} ${formatCost(stats.cost)}`;
+	const usedPercent = stats.maxContext > 0 
+		? ((totalTokens / stats.maxContext) * 100).toFixed(1)
+		: "0.0";
 	
-	// Calculate available space
+	// Left: git branch + stats
+	const left = gitBranch 
+		? `${gitBranch} ${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`
+		: `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
+	
+	// Center: current path
+	const center = currentPath ? ` ${shortenPath(currentPath)} ` : "";
+	
+	// Right: model • thinking
+	const right = modelName 
+		? `${modelName} • ${thinkingLevel || "medium"}`
+		: "";
+	
+	// Calculate
 	const leftLen = left.length;
 	const rightLen = right.length;
 	const centerLen = center.length;
@@ -88,6 +74,7 @@ function buildStatusBar(screenWidth: number): string {
 	let result: string;
 	
 	if (screenWidth <= leftLen + rightLen + minGap) {
+		// Minimal: left + truncated right
 		result = left + " " + right.slice(0, Math.max(0, screenWidth - leftLen - 1));
 	} else if (screenWidth <= leftLen + centerLen + rightLen + minGap * 2) {
 		const availForCenter = screenWidth - leftLen - rightLen - minGap * 2;
@@ -112,7 +99,7 @@ function updateStatusBar(ctx: ExtensionContext) {
 	ctx.ui.setWidget(STATUS_BAR_ID, (tui: TUI, theme: { fg: (color: string, text: string) => string }) => {
 		return {
 			render: (width?: number) => {
-				const screenWidth = width ?? tui.width ?? 80;
+				const screenWidth = width ?? tui.width ?? 120;
 				const statusText = buildStatusBar(screenWidth);
 				
 				let color = "accent";
@@ -127,59 +114,6 @@ function updateStatusBar(ctx: ExtensionContext) {
 	}, { placement: "belowEditor" });
 }
 
-function showSleeping(ctx: ExtensionContext) {
-	currentState = "sleeping";
-	clearSpinner();
-	updateStatusBar(ctx);
-}
-
-function showThinking(ctx: ExtensionContext) {
-	currentState = "thinking";
-	updateStatusBar(ctx);
-}
-
-function showWorking(ctx: ExtensionContext) {
-	currentState = "working";
-	updateStatusBar(ctx);
-}
-
-function showDone(ctx: ExtensionContext) {
-	currentState = "done";
-	updateStatusBar(ctx);
-}
-
-function showError(ctx: ExtensionContext) {
-	currentState = "error";
-	updateStatusBar(ctx);
-}
-
-function startThinkingSpinner(ctx: ExtensionContext) {
-	clearSpinner();
-	showThinking(ctx);
-
-	intervalId = setInterval(() => {
-		if (currentState === "thinking") {
-			spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
-			updateStatusBar(ctx);
-		} else if (currentState === "working") {
-			workFrame = (workFrame + 1) % WORK_FRAMES.length;
-			updateStatusBar(ctx);
-		}
-	}, 80);
-}
-
-function transitionToWorking(ctx: ExtensionContext) {
-	if (workingTimeoutId) {
-		clearTimeout(workingTimeoutId);
-	}
-
-	workingTimeoutId = setTimeout(() => {
-		if (currentState === "thinking") {
-			showWorking(ctx);
-		}
-	}, 500);
-}
-
 function updateStats(ctx: ExtensionContext) {
 	try {
 		const sessionStats = ctx.sessionManager.getSessionStats();
@@ -187,11 +121,25 @@ function updateStats(ctx: ExtensionContext) {
 			stats = {
 				inputTokens: sessionStats.promptTokens || 0,
 				outputTokens: sessionStats.completionTokens || 0,
+				maxContext: sessionStats.maxContext || 200000,
 				cost: sessionStats.estimatedCost || 0,
 			};
 		}
 	} catch {
 		// Stats not available
+	}
+	
+	// Get model info
+	try {
+		const state = ctx.sessionManager.getSessionState?.();
+		if (state?.model) {
+			modelName = state.model;
+		}
+		if (state?.thinkingLevel) {
+			thinkingLevel = state.thinkingLevel;
+		}
+	} catch {
+		// Model info not available
 	}
 }
 
@@ -199,73 +147,62 @@ export default function (pi: ExtensionAPI) {
 	// ── Session start
 	pi.on("session_start", async (_event, ctx) => {
 		currentPath = "";
-		stats = { inputTokens: 0, outputTokens: 0, cost: 0 };
-		showSleeping(ctx);
+		gitBranch = "";
+		modelName = "";
+		thinkingLevel = "";
+		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
+		updateStats(ctx);
+		updateStatusBar(ctx);
 	});
 
 	// ── Agent loop
 	pi.on("agent_start", async (_event, ctx) => {
-		if (errorTimeoutId) {
-			clearTimeout(errorTimeoutId);
-			errorTimeoutId = null;
-		}
-		if (currentState === "sleeping") {
-			startThinkingSpinner(ctx);
-			transitionToWorking(ctx);
-		}
+		currentState = "thinking";
+		updateStats(ctx);
+		updateStatusBar(ctx);
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		if (currentState !== "sleeping") {
-			showDone(ctx);
-			setTimeout(() => {
-				showSleeping(ctx);
-			}, 1500);
-		}
+		currentState = "done";
+		updateStatusBar(ctx);
+		setTimeout(() => {
+			currentState = "sleeping";
+			updateStatusBar(ctx);
+		}, 1500);
 	});
 
 	// ── Tool execution
 	pi.on("tool_execution_start", async (_event, ctx) => {
-		if (errorTimeoutId) {
-			clearTimeout(errorTimeoutId);
-			errorTimeoutId = null;
-		}
-		showWorking(ctx);
-	});
-
-	pi.on("tool_execution_update", async (_event, ctx) => {
-		if (currentState === "working") {
-			showThinking(ctx);
-		}
+		currentState = "working";
+		updateStatusBar(ctx);
 	});
 
 	pi.on("tool_execution_end", async (_event, ctx) => {
-		if (errorTimeoutId) {
-			clearTimeout(errorTimeoutId);
-			errorTimeoutId = null;
-		}
-		
-		showDone(ctx);
-		
-		errorTimeoutId = setTimeout(() => {
-			if (currentState === "done") {
-				showThinking(ctx);
-			}
-		}, 500);
+		currentState = "done";
+		updateStatusBar(ctx);
 	});
 
-	// ── Update path when working with files
+	// ── Update path from git commands
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
+		// Track git branch
+		if (text.includes("git") && text.includes("branch")) {
+			const branchMatch = text.match(/current branch:?\s*(\S+)/i);
+			if (branchMatch) {
+				gitBranch = `(${branchMatch[1]})`;
+			}
+		}
+		
+		// Track file paths from commands
 		const readMatch = text.match(/^\/read\s+(.+)/i);
 		const editMatch = text.match(/^\/edit\s+(.+)/i);
 		const writeMatch = text.match(/^\/write\s+(.+)/i);
+		const bashMatch = text.match(/\s(\/[^\s]+)/);
 		
-		const match = readMatch || editMatch || writeMatch;
+		const match = readMatch || editMatch || writeMatch || bashMatch;
 		if (match) {
-			const fullPath = match[1]!.split(/\s/)[0]!;
-			currentPath = basename(fullPath);
+			currentPath = match[1]!.split(/\s/)[0]!;
 			updateStatusBar(ctx);
 		}
 	});
@@ -278,7 +215,6 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Cleanup
 	pi.on("session_shutdown", async (_event, ctx) => {
-		clearSpinner();
 		ctx.ui.setWidget(STATUS_BAR_ID, undefined);
 	});
 
@@ -289,7 +225,7 @@ export default function (pi: ExtensionAPI) {
 			updateStats(ctx);
 			const totalTokens = stats.inputTokens + stats.outputTokens;
 			ctx.ui.notify(
-				`State: ${currentState}\nPath: ${currentPath || "none"}\nTokens: ${formatTokens(totalTokens)}\nCost: ${formatCost(stats.cost)}`,
+				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}`,
 				"info"
 			);
 		},
