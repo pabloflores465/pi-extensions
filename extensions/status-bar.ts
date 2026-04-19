@@ -99,15 +99,12 @@ function getStateLabel(): string {
 }
 
 function buildStatusBar(screenWidth: number): string {
-	const totalTokens = stats.inputTokens + stats.outputTokens;
-	const usedPercent = stats.maxContext > 0 
-		? ((totalTokens / stats.maxContext) * 100).toFixed(1)
-		: "0.0";
-	
 	// Build parts like airline
 	const statePart = `${getStateIcon()} ${getStateLabel()}`;
 	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
-	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}/${formatTokens(stats.maxContext)}`;
+	const totalTokens = stats.inputTokens + stats.outputTokens;
+	const usedPercent = stats.maxContext > 0 ? ((totalTokens / stats.maxContext) * 100).toFixed(1) : "0.0";
+	const tokensPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
 	const costPart = formatCost(stats.cost);
 	const pathPart = currentPath ? shortenPath(currentPath) : "";
 	const modelPart = `${modelName} • ${thinkingLevel}`;
