@@ -101,9 +101,9 @@ function updateStatusBar(ctx: ExtensionContext) {
 				const screenWidth = width ?? tui.width ?? 120;
 				const statusText = buildStatusBar(screenWidth);
 				
-				let color = "green";
-				if (isWorking) color = "yellow";
-				else if (isThinking) color = "accent";
+				let color = "accent";
+				if (isWorking) color = "warning";
+				else if (isThinking) color = "muted";
 				
 				return [theme.fg(color, statusText)];
 			},
