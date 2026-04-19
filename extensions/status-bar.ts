@@ -1,7 +1,7 @@
 /**
  * Status Bar Extension - Neovim Lualine Style
  * 
- * Layout: (branch) 0.0%/197k (auto) | path | model • thinking
+ * Layout: (branch ▲▼) 0.0%/197k | ~/path | cost | model • thinking
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -13,7 +13,8 @@ const STATUS_BAR_ID = "status-bar";
 
 let currentPath = "";
 let gitBranch = "";
-let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000 };
+let gitStatus = ""; // ▲▼ indicators
+let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 let modelName = "";
 let thinkingLevel = "";
 let isWorking = false;
@@ -25,6 +26,12 @@ function formatTokens(tokens: number): string {
 	return String(tokens);
 }
 
+function formatCost(cost: number): string {
+	if (cost < 0.001) return "$0";
+	if (cost < 1) return `$${cost.toFixed(3)}`;
+	return `$${cost.toFixed(2)}`;
+}
+
 function shortenPath(fullPath: string): string {
 	const home = homedir();
 	let path = fullPath;
@@ -33,7 +40,7 @@ function shortenPath(fullPath: string): string {
 		path = "~" + path.slice(home.length);
 	}
 	
-	if (path.length > 40) {
+	if (path.length > 35) {
 		const base = basename(path);
 		const dir = dirname(path);
 		if (dir.length > 20) {
@@ -49,20 +56,24 @@ function buildStatusBar(screenWidth: number): string {
 		? ((totalTokens / stats.maxContext) * 100).toFixed(1)
 		: "0.0";
 	
-	// Left: git branch + stats
-	const left = gitBranch 
-		? `${gitBranch} ${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`
-		: `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
+	// Left: git branch with status indicators
+	const gitInfo = gitBranch || gitStatus
+		? `${gitBranch || ""}${gitStatus}`
+		: "";
+	const left = gitInfo 
+		? `${gitInfo} ${usedPercent}%/${formatTokens(stats.maxContext)}`
+		: `${usedPercent}%/${formatTokens(stats.maxContext)}`;
 	
-	// Center: current path only when working/thinking
-	const center = (isWorking || isThinking) && currentPath 
+	// Center: current path (always show if available)
+	const center = currentPath 
 		? ` ${shortenPath(currentPath)} `
 		: "";
 	
-	// Right: model • thinking
+	// Right: cost + model
+	const costStr = formatCost(stats.cost);
 	const right = modelName 
-		? `${modelName} • ${thinkingLevel || "medium"}`
-		: "";
+		? `${costStr} | ${modelName} • ${thinkingLevel || "medium"}`
+		: costStr;
 	
 	const leftLen = left.length;
 	const rightLen = right.length;
@@ -99,10 +110,9 @@ function updateStatusBar(ctx: ExtensionContext) {
 				const screenWidth = width ?? tui.width ?? 120;
 				const statusText = buildStatusBar(screenWidth);
 				
-				// Valid theme colors: accent, success, error, warning, muted, dim, text
-				let color = "text";
+				let color = "accent";
 				if (isWorking) color = "warning";
-				else if (isThinking) color = "accent";
+				else if (isThinking) color = "muted";
 				
 				return [theme.fg(color, statusText)];
 			},
@@ -119,6 +129,7 @@ function updateStats(ctx: ExtensionContext) {
 				inputTokens: sessionStats.promptTokens || 0,
 				outputTokens: sessionStats.completionTokens || 0,
 				maxContext: sessionStats.maxContext || 200000,
+				cost: sessionStats.estimatedCost || 0,
 			};
 		}
 	} catch {
@@ -138,28 +149,43 @@ function updateStats(ctx: ExtensionContext) {
 	}
 }
 
+// Sync git info using import.meta.url workaround
+async function getGitInfoAsync() {
+	const { execSync } = await import("node:child_process");
+	try {
+		const cwd = process.cwd();
+		
+		const branch = execSync("git branch --show-current 2>/dev/null || echo ''", { cwd, encoding: "utf8" }).trim();
+		gitBranch = branch ? `(${branch})` : "";
+		
+		const status = execSync("git status --porcelain 2>/dev/null | head -1 || echo ''", { cwd, encoding: "utf8" }).trim();
+		if (status) {
+			const hasChanges = status.includes(" M") || status.includes("??");
+			const hasStaged = /^[A-Z]/.test(status);
+			gitStatus = hasChanges ? " ▲" : hasStaged ? " ●" : "";
+		} else {
+			gitStatus = "";
+		}
+	} catch {
+		gitBranch = "";
+		gitStatus = "";
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	// ── Session start
 	pi.on("session_start", async (_event, ctx) => {
 		currentPath = "";
 		gitBranch = "";
+		gitStatus = "";
 		modelName = "";
 		thinkingLevel = "";
 		isWorking = false;
 		isThinking = false;
-		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000 };
+		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 		
-		// Get git branch from working directory
-		try {
-			const { execSync } = await import("node:child_process");
-			const cwd = process.cwd();
-			const branch = execSync("git branch --show-current 2>/dev/null || echo ''", { cwd, encoding: "utf8" }).trim();
-			if (branch && branch !== "(no branch)") {
-				gitBranch = `(${branch})`;
-			}
-		} catch {
-			// Git not available or not a git repo
-		}
+		// Get git info asynchronously
+		getGitInfoAsync();
 		
 		updateStats(ctx);
 		updateStatusBar(ctx);
@@ -192,11 +218,10 @@ export default function (pi: ExtensionAPI) {
 		updateStatusBar(ctx);
 	});
 
-	// ── Track file paths (but NOT branch from here)
+	// ── Track file paths
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
-		// Extract file paths from commands
 		const readMatch = text.match(/^\/read\s+(\S+)/);
 		const editMatch = text.match(/^\/edit\s+(\S+)/);
 		const writeMatch = text.match(/^\/write\s+(\S+)/);
@@ -226,7 +251,7 @@ export default function (pi: ExtensionAPI) {
 			updateStats(ctx);
 			const totalTokens = stats.inputTokens + stats.outputTokens;
 			ctx.ui.notify(
-				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nModel: ${modelName} • ${thinkingLevel}`,
+				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}`,
 				"info"
 			);
 		},
