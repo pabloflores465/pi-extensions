@@ -1,7 +1,7 @@
 /**
- * Status Bar Extension - Neovim Lualine Style
+ * Status Bar Extension - Neovim Airline Style
  * 
- * Layout: (branch ▲▼) 0.0%/197k | ~/path | cost | model • thinking
+ * Shows: state icon | branch | context% | path | cost | model • thinking
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -9,16 +9,45 @@ import type { TUI } from "@mariozechner/pi-tui";
 import { basename, dirname } from "node:path";
 import { homedir } from "node:os";
 
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const WORK_FRAMES = ["◐", "◓", "◑", "◒"];
 const STATUS_BAR_ID = "status-bar";
+
+type State = "sleeping" | "thinking" | "working" | "done" | "error";
+
+let currentState: State = "sleeping";
+let spinnerFrame = 0;
+let workFrame = 0;
+let intervalId: ReturnType<typeof setInterval> | null = null;
+let workingTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let errorTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 let currentPath = "";
 let gitBranch = "";
-let gitStatus = ""; // ▲▼ indicators
+let gitStatus = ""; // ▲▼● indicators
 let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 let modelName = "";
 let thinkingLevel = "";
-let isWorking = false;
-let isThinking = false;
+let loadedSkills: Set<string> = new Set();
+
+function clearSpinner() {
+	if (intervalId) {
+		clearInterval(intervalId);
+		intervalId = null;
+	}
+	if (workingTimeoutId) {
+		clearTimeout(workingTimeoutId);
+		workingTimeoutId = null;
+	}
+}
+
+function getSpinner(): string {
+	return SPINNER_FRAMES[spinnerFrame]!;
+}
+
+function getWorkSpinner(): string {
+	return WORK_FRAMES[workFrame]!;
+}
 
 function formatTokens(tokens: number): string {
 	if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
@@ -40,14 +69,34 @@ function shortenPath(fullPath: string): string {
 		path = "~" + path.slice(home.length);
 	}
 	
-	if (path.length > 35) {
+	if (path.length > 30) {
 		const base = basename(path);
 		const dir = dirname(path);
-		if (dir.length > 20) {
+		if (dir.length > 18) {
 			return ".../" + base;
 		}
 	}
 	return path;
+}
+
+function getStateIcon(): string {
+	switch (currentState) {
+		case "sleeping": return "○";
+		case "thinking": return getSpinner();
+		case "working": return getWorkSpinner();
+		case "done": return "✓";
+		case "error": return "✗";
+	}
+}
+
+function getStateLabel(): string {
+	switch (currentState) {
+		case "sleeping": return "sleeping";
+		case "thinking": return "thinking";
+		case "working": return "working";
+		case "done": return "done";
+		case "error": return "error";
+	}
 }
 
 function buildStatusBar(screenWidth: number): string {
@@ -56,48 +105,54 @@ function buildStatusBar(screenWidth: number): string {
 		? ((totalTokens / stats.maxContext) * 100).toFixed(1)
 		: "0.0";
 	
-	// Left: git branch with status indicators
+	// State icon + label
+	const stateIcon = getStateIcon();
+	const stateLabel = getStateLabel();
+	
+	// Git info
 	const gitInfo = gitBranch || gitStatus
 		? `${gitBranch || ""}${gitStatus}`
 		: "";
-	const left = gitInfo 
-		? `${gitInfo} ${usedPercent}%/${formatTokens(stats.maxContext)}`
-		: `${usedPercent}%/${formatTokens(stats.maxContext)}`;
 	
-	// Center: current path (always show if available)
-	const center = currentPath 
-		? ` ${shortenPath(currentPath)} `
-		: "";
+	// Build segments
+	const statePart = `${stateIcon} ${stateLabel}`;
+	const gitPart = gitInfo;
+	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)}`;
+	const pathPart = currentPath ? shortenPath(currentPath) : "";
+	const costPart = formatCost(stats.cost);
+	const modelPart = modelName ? `${modelName} • ${thinkingLevel || "medium"}` : "";
 	
-	// Right: cost + model
-	const costStr = formatCost(stats.cost);
-	const right = modelName 
-		? `${costStr} | ${modelName} • ${thinkingLevel || "medium"}`
-		: costStr;
+	// Combine: state | git | context | path | cost | model
+	// Try to fit as much as possible
+	const parts: { text: string; priority: number }[] = [
+		{ text: statePart, priority: 1 },
+		{ text: gitPart, priority: 2 },
+		{ text: contextPart, priority: 3 },
+		{ text: pathPart, priority: 4 },
+		{ text: costPart, priority: 5 },
+		{ text: modelPart, priority: 6 },
+	].filter(p => p.text);
 	
-	const leftLen = left.length;
-	const rightLen = right.length;
-	const centerLen = center.length;
-	const minGap = 2;
+	// Build from left to right, truncating as needed
+	let result = "";
+	let remaining = screenWidth;
 	
-	let result: string;
-	
-	if (screenWidth <= leftLen + rightLen + minGap) {
-		result = left + " " + right.slice(0, Math.max(0, screenWidth - leftLen - 1));
-	} else if (screenWidth <= leftLen + centerLen + rightLen + minGap * 2) {
-		const availForCenter = screenWidth - leftLen - rightLen - minGap * 2;
-		const truncatedCenter = centerLen > availForCenter && availForCenter > 0
-			? center.slice(0, availForCenter)
-			: center;
-		result = left + " " + truncatedCenter + " ".repeat(minGap) + right;
-	} else {
-		const availForCenter = screenWidth - leftLen - rightLen - minGap * 2;
-		const filler = " ".repeat(Math.max(0, availForCenter));
-		result = left + " " + center + filler + " ".repeat(minGap) + right;
-	}
-	
-	if (result.length > screenWidth) {
-		result = result.slice(0, screenWidth);
+	for (let i = 0; i < parts.length && remaining > 0; i++) {
+		const part = parts[i]!;
+		const separator = i > 0 ? " | " : "";
+		const sepLen = i > 0 ? 3 : 0;
+		
+		if (part.text.length + sepLen > remaining) {
+			// Truncate this part
+			const availForText = Math.max(0, remaining - sepLen);
+			if (availForText > 3) {
+				result += separator + part.text.slice(0, availForText);
+			}
+			break;
+		} else {
+			result += separator + part.text;
+			remaining -= part.text.length + sepLen;
+		}
 	}
 	
 	return result;
@@ -111,14 +166,45 @@ function updateStatusBar(ctx: ExtensionContext) {
 				const statusText = buildStatusBar(screenWidth);
 				
 				let color = "accent";
-				if (isWorking) color = "warning";
-				else if (isThinking) color = "muted";
+				if (currentState === "error") color = "error";
+				else if (currentState === "done") color = "success";
+				else if (currentState === "working") color = "warning";
+				else if (currentState === "thinking") color = "muted";
 				
 				return [theme.fg(color, statusText)];
 			},
 			invalidate: () => {},
 		};
 	}, { placement: "belowEditor" });
+}
+
+function startThinkingSpinner(ctx: ExtensionContext) {
+	clearSpinner();
+	currentState = "thinking";
+	updateStatusBar(ctx);
+
+	intervalId = setInterval(() => {
+		if (currentState === "thinking") {
+			spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+			updateStatusBar(ctx);
+		} else if (currentState === "working") {
+			workFrame = (workFrame + 1) % WORK_FRAMES.length;
+			updateStatusBar(ctx);
+		}
+	}, 80);
+}
+
+function transitionToWorking(ctx: ExtensionContext) {
+	if (workingTimeoutId) {
+		clearTimeout(workingTimeoutId);
+	}
+
+	workingTimeoutId = setTimeout(() => {
+		if (currentState === "thinking") {
+			currentState = "working";
+			updateStatusBar(ctx);
+		}
+	}, 500);
 }
 
 function updateStats(ctx: ExtensionContext) {
@@ -149,10 +235,18 @@ function updateStats(ctx: ExtensionContext) {
 	}
 }
 
-// Sync git info using import.meta.url workaround
-async function getGitInfoAsync() {
-	const { execSync } = await import("node:child_process");
+function scanSkills() {
+	const commands = pi.getCommands();
+	for (const cmd of commands) {
+		if (cmd.source === "skill") {
+			loadedSkills.add(cmd.name);
+		}
+	}
+}
+
+async function getGitInfo() {
 	try {
+		const { execSync } = await import("node:child_process");
 		const cwd = process.cwd();
 		
 		const branch = execSync("git branch --show-current 2>/dev/null || echo ''", { cwd, encoding: "utf8" }).trim();
@@ -180,45 +274,73 @@ export default function (pi: ExtensionAPI) {
 		gitStatus = "";
 		modelName = "";
 		thinkingLevel = "";
-		isWorking = false;
-		isThinking = false;
+		loadedSkills = new Set();
 		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
+		currentState = "sleeping";
 		
-		// Get git info asynchronously
-		getGitInfoAsync();
-		
+		getGitInfo();
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
 
 	// ── Agent loop
 	pi.on("agent_start", async (_event, ctx) => {
-		isThinking = true;
-		isWorking = false;
-		updateStats(ctx);
-		updateStatusBar(ctx);
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
+		}
+		if (currentState === "sleeping") {
+			startThinkingSpinner(ctx);
+			transitionToWorking(ctx);
+		}
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		isThinking = false;
-		isWorking = false;
-		updateStatusBar(ctx);
+		if (currentState !== "sleeping") {
+			currentState = "done";
+			updateStatusBar(ctx);
+			setTimeout(() => {
+				currentState = "sleeping";
+				updateStatusBar(ctx);
+			}, 1500);
+		}
 	});
 
 	// ── Tool execution
 	pi.on("tool_execution_start", async (_event, ctx) => {
-		isWorking = true;
-		isThinking = false;
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
+		}
+		currentState = "working";
 		updateStatusBar(ctx);
+	});
+
+	pi.on("tool_execution_update", async (_event, ctx) => {
+		if (currentState === "working") {
+			currentState = "thinking";
+			updateStatusBar(ctx);
+		}
 	});
 
 	pi.on("tool_execution_end", async (_event, ctx) => {
-		isWorking = false;
-		updateStats(ctx);
+		if (errorTimeoutId) {
+			clearTimeout(errorTimeoutId);
+			errorTimeoutId = null;
+		}
+		
+		currentState = "done";
 		updateStatusBar(ctx);
+		
+		errorTimeoutId = setTimeout(() => {
+			if (currentState === "done") {
+				currentState = "thinking";
+				updateStatusBar(ctx);
+			}
+		}, 500);
 	});
 
-	// ── Track file paths
+	// ── Track file paths and skills
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
@@ -231,27 +353,54 @@ export default function (pi: ExtensionAPI) {
 			currentPath = match[1]!;
 			updateStatusBar(ctx);
 		}
+		
+		// Detect skill loading
+		if (text.startsWith("/skill:")) {
+			const skillName = text.slice(7).split(/\s/)[0];
+			if (skillName && !loadedSkills.has(skillName)) {
+				loadedSkills.add(skillName);
+				updateStatusBar(ctx);
+			}
+		}
 	});
 
-	// ── Update stats on turn end
+	// ── Update on turn end
 	pi.on("turn_end", async (_event, ctx) => {
+		scanSkills();
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
 
 	// ── Cleanup
 	pi.on("session_shutdown", async (_event, ctx) => {
+		clearSpinner();
 		ctx.ui.setWidget(STATUS_BAR_ID, undefined);
 	});
 
 	// ── Commands
-	pi.registerCommand("status", {
-		description: "Show current status bar info",
+	pi.registerCommand("test-loading", {
+		description: "Test loading indicator",
 		handler: async (_args, ctx) => {
+			startThinkingSpinner(ctx);
+			transitionToWorking(ctx);
+			await new Promise((r) => setTimeout(r, 2000));
+			currentState = "done";
+			updateStatusBar(ctx);
+			setTimeout(() => {
+				currentState = "sleeping";
+				updateStatusBar(ctx);
+			}, 1500);
+		},
+	});
+
+	pi.registerCommand("status", {
+		description: "Show status bar info",
+		handler: async (_args, ctx) => {
+			scanSkills();
 			updateStats(ctx);
 			const totalTokens = stats.inputTokens + stats.outputTokens;
 			ctx.ui.notify(
-				`Path: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}`,
+				`State: ${currentState}\nPath: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}\nSkills: ${Array.from(loadedSkills).join(", ") || "none"}`,
 				"info"
 			);
 		},
