@@ -120,27 +120,25 @@ function formatRagChunks(chunks: number): string {
 }
 
 function buildStatusBar(screenWidth: number): string {
-	// Build parts like airline
+	// Minimal airline style: state | context% | ↑↓ tokens | RAG | $cost | branch | model • thinking
 	const statePart = `${getStateIcon()} ${getStateLabel()}`;
-	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
 	const totalTokens = stats.inputTokens + stats.outputTokens;
 	const usedPercent = stats.maxContext > 0 ? ((totalTokens / stats.maxContext) * 100).toFixed(1) : "0.0";
 	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
 	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}`;
 	const ragPart = ragChunks > 0 ? formatRagChunks(ragChunks) : "";
 	const costPart = formatCost(stats.cost);
-	const pathPart = currentPath ? `${shortenPath(currentPath)}${gitPart ? ` ${gitPart}` : ""}` : gitPart;
+	const gitPart = gitBranch ? `${gitBranch}${gitStatus}` : "";
 	const modelPart = `${modelName} • ${thinkingLevel}`;
 	
-	// Combine parts with | separator, fitting as much as possible
-	// Priority: state(1) > context(2) > tokens(3) > rag(4) > cost(5) > path(6) > model(7)
+	// Only show essential parts
 	const parts: { text: string; priority: number }[] = [
 		{ text: statePart, priority: 1 },
 		{ text: contextPart, priority: 2 },
 		{ text: tokensPart, priority: 3 },
 		{ text: ragPart, priority: 4 },
 		{ text: costPart, priority: 5 },
-		{ text: pathPart, priority: 6 },
+		{ text: gitPart, priority: 6 },
 		{ text: modelPart, priority: 7 },
 	].filter(p => p.text);
 	
