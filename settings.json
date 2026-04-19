@@ -18,6 +18,7 @@
   ],
   "packages": [
     "npm:pi-nvim",
-    "npm:pi-better-ctx"
+    "npm:pi-better-ctx",
+    "npm:space-invaders"
   ]
 }
