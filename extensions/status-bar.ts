@@ -107,7 +107,8 @@ function buildStatusBar(screenWidth: number): string {
 	// Build parts like airline
 	const statePart = `${getStateIcon()} ${getStateLabel()}`;
 	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
-	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}`;
+	const tokensPart = `↑${formatTokens(stats.inputTokens)} ↓${formatTokens(stats.outputTokens)}/${formatTokens(stats.maxContext)}`;
+	const costPart = formatCost(stats.cost);
 	const pathPart = currentPath ? shortenPath(currentPath) : "";
 	const modelPart = `${modelName} • ${thinkingLevel}`;
 	
@@ -116,7 +117,8 @@ function buildStatusBar(screenWidth: number): string {
 		{ text: statePart, priority: 1 },
 		{ text: gitPart, priority: 2 },
 		{ text: tokensPart, priority: 3 },
-		{ text: pathPart, priority: 4 },
+		{ text: costPart, priority: 4 },
+		{ text: pathPart, priority: 5 },
 		{ text: modelPart, priority: 5 },
 	].filter(p => p.text);
 	
