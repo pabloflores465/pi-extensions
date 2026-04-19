@@ -1,7 +1,7 @@
 /**
  * Status Bar Extension - Neovim Airline Style
  * 
- * Shows: state icon | branch | context% | path | cost | model • thinking
+ * Layout: state | (branch) | 0.0%/197k (auto) | ~/path | model • thinking
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -24,11 +24,10 @@ let errorTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 let currentPath = "";
 let gitBranch = "";
-let gitStatus = ""; // ▲▼● indicators
+let gitStatus = "";
 let stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
-let modelName = "";
-let thinkingLevel = "";
-let loadedSkills: Set<string> = new Set();
+let modelName = "minimax/minimax-m2.7";
+let thinkingLevel = "high";
 
 function clearSpinner() {
 	if (intervalId) {
@@ -105,35 +104,22 @@ function buildStatusBar(screenWidth: number): string {
 		? ((totalTokens / stats.maxContext) * 100).toFixed(1)
 		: "0.0";
 	
-	// State icon + label
-	const stateIcon = getStateIcon();
-	const stateLabel = getStateLabel();
-	
-	// Git info
-	const gitInfo = gitBranch || gitStatus
-		? `${gitBranch || ""}${gitStatus}`
-		: "";
-	
-	// Build segments
-	const statePart = `${stateIcon} ${stateLabel}`;
-	const gitPart = gitInfo;
-	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)}`;
+	// Build parts like airline
+	const statePart = `${getStateIcon()} ${getStateLabel()}`;
+	const gitPart = gitBranch ? `(${gitBranch}${gitStatus})` : "";
+	const contextPart = `${usedPercent}%/${formatTokens(stats.maxContext)} (auto)`;
 	const pathPart = currentPath ? shortenPath(currentPath) : "";
-	const costPart = formatCost(stats.cost);
-	const modelPart = modelName ? `${modelName} • ${thinkingLevel || "medium"}` : "";
+	const modelPart = `${modelName} • ${thinkingLevel}`;
 	
-	// Combine: state | git | context | path | cost | model
-	// Try to fit as much as possible
+	// Combine parts with | separator, fitting as much as possible
 	const parts: { text: string; priority: number }[] = [
 		{ text: statePart, priority: 1 },
 		{ text: gitPart, priority: 2 },
 		{ text: contextPart, priority: 3 },
 		{ text: pathPart, priority: 4 },
-		{ text: costPart, priority: 5 },
-		{ text: modelPart, priority: 6 },
+		{ text: modelPart, priority: 5 },
 	].filter(p => p.text);
 	
-	// Build from left to right, truncating as needed
 	let result = "";
 	let remaining = screenWidth;
 	
@@ -143,7 +129,6 @@ function buildStatusBar(screenWidth: number): string {
 		const sepLen = i > 0 ? 3 : 0;
 		
 		if (part.text.length + sepLen > remaining) {
-			// Truncate this part
 			const availForText = Math.max(0, remaining - sepLen);
 			if (availForText > 3) {
 				result += separator + part.text.slice(0, availForText);
@@ -222,6 +207,7 @@ function updateStats(ctx: ExtensionContext) {
 		// Stats not available
 	}
 	
+	// Get model info from session state
 	try {
 		const state = ctx.sessionManager.getSessionState?.();
 		if (state?.model) {
@@ -231,16 +217,7 @@ function updateStats(ctx: ExtensionContext) {
 			thinkingLevel = state.thinkingLevel;
 		}
 	} catch {
-		// Model info not available
-	}
-}
-
-function scanSkills() {
-	const commands = pi.getCommands();
-	for (const cmd of commands) {
-		if (cmd.source === "skill") {
-			loadedSkills.add(cmd.name);
-		}
+		// Use defaults
 	}
 }
 
@@ -250,7 +227,7 @@ async function getGitInfo() {
 		const cwd = process.cwd();
 		
 		const branch = execSync("git branch --show-current 2>/dev/null || echo ''", { cwd, encoding: "utf8" }).trim();
-		gitBranch = branch ? `(${branch})` : "";
+		gitBranch = branch || "";
 		
 		const status = execSync("git status --porcelain 2>/dev/null | head -1 || echo ''", { cwd, encoding: "utf8" }).trim();
 		if (status) {
@@ -272,9 +249,6 @@ export default function (pi: ExtensionAPI) {
 		currentPath = "";
 		gitBranch = "";
 		gitStatus = "";
-		modelName = "";
-		thinkingLevel = "";
-		loadedSkills = new Set();
 		stats = { inputTokens: 0, outputTokens: 0, maxContext: 200000, cost: 0 };
 		currentState = "sleeping";
 		
@@ -340,7 +314,7 @@ export default function (pi: ExtensionAPI) {
 		}, 500);
 	});
 
-	// ── Track file paths and skills
+	// ── Track file paths
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
 		
@@ -353,20 +327,10 @@ export default function (pi: ExtensionAPI) {
 			currentPath = match[1]!;
 			updateStatusBar(ctx);
 		}
-		
-		// Detect skill loading
-		if (text.startsWith("/skill:")) {
-			const skillName = text.slice(7).split(/\s/)[0];
-			if (skillName && !loadedSkills.has(skillName)) {
-				loadedSkills.add(skillName);
-				updateStatusBar(ctx);
-			}
-		}
 	});
 
 	// ── Update on turn end
 	pi.on("turn_end", async (_event, ctx) => {
-		scanSkills();
 		updateStats(ctx);
 		updateStatusBar(ctx);
 	});
@@ -396,11 +360,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("status", {
 		description: "Show status bar info",
 		handler: async (_args, ctx) => {
-			scanSkills();
 			updateStats(ctx);
 			const totalTokens = stats.inputTokens + stats.outputTokens;
 			ctx.ui.notify(
-				`State: ${currentState}\nPath: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}\nSkills: ${Array.from(loadedSkills).join(", ") || "none"}`,
+				`State: ${currentState}\nPath: ${currentPath || "none"}\nBranch: ${gitBranch || "none"}\nTokens: ${formatTokens(totalTokens)}/${formatTokens(stats.maxContext)}\nCost: ${formatCost(stats.cost)}\nModel: ${modelName} • ${thinkingLevel}`,
 				"info"
 			);
 		},
