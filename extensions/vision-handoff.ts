@@ -250,6 +250,17 @@ export default function (pi: ExtensionAPI) {
         ctx.signal
       );
 
+      // VALIDACIÓN: Si la descripción está vacía, forzamos el fallback
+      if (!descriptions[0] || descriptions[0].trim() === "") {
+        console.warn(`[vision-handoff] Primary model returned empty description. Triggering fallback to Gemma 4...`);
+        const fallbackModel = ctx.modelRegistry.find("openrouter", "google/gemma-4-31b-it:free");
+        if (fallbackModel) {
+            ctx.ui.notify(`[vision-handoff] Primary model returned empty response. Retrying with Gemma 4...`, "warning");
+            const fallbackDescs = await describeImages(allImages, fallbackModel, auth.apiKey, auth.headers, ctx.signal);
+            if (fallbackDescs[0]) descriptions[0] = fallbackDescs[0];
+        }
+      }
+
       // Build new text with image descriptions
       // Remove the image paths from the original text
       let newText = text;
