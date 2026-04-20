@@ -1,1 +1,68 @@
-{"lastChangelogVersion":"0.67.68","defaultProvider":"openrouter","defaultModel":"minimax/minimax-m2.7","defaultThinkingLevel":"high","transport":"websocket","compaction":{"enabled":true,"keepRecentTokens":5000,"model":"google/gemini-3.1-flash-lite-preview"},"steeringMode":"one-at-a-time","extensions":["/Users/pabloflores/.pi/agent/extensions/colon-quit.ts","/Users/pabloflores/.pi/agent/extensions/large-message-handler.ts","/Users/pabloflores/.pi/agent/extensions/openrouter-rag.ts","/Users/pabloflores/.pi/agent/extensions/always-caveman.ts","/Users/pabloflores/.pi/agent/extensions/space-invaders.ts"],"packages":["npm:pi-nvim","npm:pi-better-ctx","npm:space-invaders"]}
+{
+  "lastChangelogVersion": "0.67.68",
+  "defaultProvider": "openrouter",
+  "defaultModel": "minimax/minimax-m2.5:free",
+  "defaultThinkingLevel": "high",
+  "transport": "websocket",
+  "compaction": {
+    "enabled": true,
+    "keepRecentTokens": 5000
+  },
+  "steeringMode": "one-at-a-time",
+  "extensions": [
+    "/Users/pabloflores/.pi/agent/extensions/colon-quit.ts",
+    "/Users/pabloflores/.pi/agent/extensions/compaction-master.ts",
+    "/Users/pabloflores/.pi/agent/extensions/large-message-handler.ts",
+    "/Users/pabloflores/.pi/agent/extensions/openrouter-rag.ts",
+    "/Users/pabloflores/.pi/agent/extensions/always-caveman.ts",
+    "/Users/pabloflores/.pi/agent/extensions/space-invaders.ts",
+    "/Users/pabloflores/Documents/node_modules/pi-subagents"
+  ],
+  "packages": [
+    "npm:pi-nvim",
+    "npm:pi-better-ctx",
+    "npm:space-invaders",
+    "npm:pi-subagents",
+    "npm:lsp-pi"
+  ],
+  "subagents": {
+    "agentOverrides": {
+      "scout": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "planner": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "worker": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "reviewer": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "delegate": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "context-builder": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      },
+      "researcher": {
+        "model": "minimax/minimax-m2.7",
+        "thinking": "high"
+      }
+    },
+    "parallel": {
+      "maxTasks": 12,
+      "concurrency": 6
+    },
+    "maxSubagentDepth": 2,
+    "intercomBridge": {
+      "mode": "always"
+    }
+  }
+}
