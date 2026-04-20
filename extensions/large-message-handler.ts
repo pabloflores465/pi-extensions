@@ -11,26 +11,25 @@
  * Files are saved to the session directory so the model can access them.
  */
 
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const DEFAULT_MAX_TOKENS = 100000; // Max tokens before splitting (leave room for context)
+const DEFAULT_MAX_TOKENS = 100000;
 const TEMP_FILE_PREFIX = "pi-large-msg-";
 const TEMP_FILE_DIR = "large-messages";
 
 interface LargeMessageSettings {
-	maxTokens?: number;  // Max tokens before saving to file
+	maxTokens?: number;
 	enabled?: boolean;
 }
 
 const DEFAULT_SETTINGS: Required<LargeMessageSettings> = {
-	maxTokens: 100000,  // Keep well under 200k context to leave room for session
+	maxTokens: 100000,
 	enabled: true,
 };
 
 function estimateTokens(text: string): number {
-	// Rough estimate: 1 token ≈ 4 characters
 	return Math.ceil(text.length / 4);
 }
 
@@ -56,22 +55,18 @@ function extractTextFromContent(content: unknown): string {
 }
 
 function getMessagesDir(pi: ExtensionAPI): string {
-	// Use the session directory if available, otherwise use cwd
 	return pi.sessionDir || process.cwd();
 }
 
 async function saveToTempFile(content: string, pi: ExtensionAPI): Promise<string> {
-	// Create messages directory in the session directory
 	const messagesDir = join(getMessagesDir(pi), TEMP_FILE_DIR);
 	await mkdir(messagesDir, { recursive: true });
 
-	// Generate unique filename
 	const timestamp = Date.now();
 	const random = Math.random().toString(36).substring(2, 8);
 	const filename = `${TEMP_FILE_PREFIX}${timestamp}-${random}.txt`;
 	const filepath = join(messagesDir, filename);
 
-	// Save content
 	await writeFile(filepath, content, "utf-8");
 
 	console.log(`[large-msg] Saved ${content.length} chars to ${filepath}`);
@@ -83,19 +78,13 @@ export default function (pi: ExtensionAPI) {
 	console.log("[large-msg] Extension loaded!");
 
 	pi.on("input", async (event) => {
-		// Get settings
 		const extSettings = pi.settings?.["large-message-handler"] as LargeMessageSettings | undefined;
 		const settings: Required<LargeMessageSettings> = {
 			maxTokens: extSettings?.maxTokens || DEFAULT_SETTINGS.maxTokens,
 			enabled: extSettings?.enabled !== false,
 		};
 
-		if (!settings.enabled) {
-			return;
-		}
-
-		// Only handle text messages (not with images etc)
-		if (!event.text) {
+		if (!settings.enabled || !event.text) {
 			return;
 		}
 
@@ -103,29 +92,22 @@ export default function (pi: ExtensionAPI) {
 		const tokens = estimateTokens(text);
 		const currentModel = pi.model;
 		const contextWindow = currentModel?.contextWindow || 200000;
-		// Calculate how much room we need to leave for session context
-		const roomForContext = Math.floor(contextWindow * 0.5); // Leave 50% for session
+		const roomForContext = Math.floor(contextWindow * 0.5);
 		const effectiveMaxTokens = Math.min(settings.maxTokens, roomForContext);
 
-		console.log(`[large-msg] Input: ${text.length} chars, ~${tokens} tokens`);
-		console.log(`[large-msg] Model context: ${contextWindow}, room for input: ${effectiveMaxTokens}`);
-
 		if (tokens <= effectiveMaxTokens) {
-			console.log(`[large-msg] Fits in context, passing through`);
 			return;
 		}
-
-		console.log(`[large-msg] Content too large, saving to session directory...`);
 
 		try {
 			const filepath = await saveToTempFile(text, pi);
 			const relativePath = filepath.replace(process.cwd() + "/", "");
-
-			console.log(`[large-msg] Replacing input with /read command for ${relativePath}`);
+            const fileContent = await readFile(filepath, "utf-8");
+            const lines = fileContent.split("\n").length;
 
 			return {
 				action: "transform",
-				text: `/read ${relativePath}\n\n[Large message (${text.length} chars, ~${tokens} tokens) saved to file for context efficiency. The file will be read automatically.]`,
+				text: `/read ${relativePath}\n\n[LARGE MESSAGE DETECTED: ~${tokens} tokens, ${lines} lines]\nThis file is too large for the immediate context. Please interact with it using surgical tools:\n1. Use 'read_file' with 'start_line' and 'end_line' to examine specific sections.\n2. Use 'grep_search' to find relevant symbols or patterns.\n3. Do not attempt to read the entire file at once to avoid context overflow.`,
 			};
 		} catch (error) {
 			console.error(`[large-msg] Error handling large message: ${error}`);
