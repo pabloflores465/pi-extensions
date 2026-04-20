@@ -12,6 +12,7 @@
   "extensions": [
     "/Users/pabloflores/.pi/agent/extensions/colon-quit.ts",
     "/Users/pabloflores/.pi/agent/extensions/compaction-master.ts",
+    "/Users/pabloflores/.pi/agent/extensions/fallback-manager.ts",
     "/Users/pabloflores/.pi/agent/extensions/large-message-handler.ts",
     "/Users/pabloflores/.pi/agent/extensions/openrouter-rag.ts",
     "/Users/pabloflores/.pi/agent/extensions/always-caveman.ts",
