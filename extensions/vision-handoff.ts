@@ -199,6 +199,7 @@ export default function (pi: ExtensionAPI) {
     // Find the multimodal model
     const visionProviders = [
       { provider: "openrouter", id: "google/gemini-3.1-flash-lite-preview" },
+      { provider: "openrouter", id: "google/gemma-4-31b-it:free" },
     ];
 
     let multimodalModel: Model | undefined;
