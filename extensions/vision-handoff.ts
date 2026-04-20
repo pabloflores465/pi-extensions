@@ -278,6 +278,25 @@ export default function (pi: ExtensionAPI) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[vision-handoff] Error: ${message}`);
+      
+      // Check for credit/balance issues
+      if (/credit|balance|insufficient|payment|quota/i.test(message)) {
+        console.warn(`[vision-handoff] Credit issue detected. Attempting fallback to Gemma 4...`);
+        const fallbackModel = ctx.modelRegistry.find("openrouter", "google/gemma-4-31b-it:free");
+        if (fallbackModel) {
+            ctx.ui.notify(`[vision-handoff] Primary vision model failed (credits). Retrying with Gemma 4...`, "warning");
+            try {
+                const descriptions = await describeImages(allImages, fallbackModel, auth.apiKey, auth.headers, ctx.signal);
+                let newText = text;
+                for (const imgPath of imagePaths) newText = newText.replace(imgPath, "");
+                newText = newText.trim() + "\n\n[Image: " + descriptions[0] + "]";
+                return { action: "transform", text: newText.trim() };
+            } catch (fallbackError) {
+                console.error(`[vision-handoff] Fallback failed: ${fallbackError}`);
+            }
+        }
+      }
+
       ctx.ui.notify(`[vision-handoff] Failed: ${message}`, "warning");
       return { action: "continue" };
     }
