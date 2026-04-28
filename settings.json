@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.67.68",
-  "defaultProvider": "openrouter",
-  "defaultModel": "minimax/minimax-m2.5:free",
-  "defaultThinkingLevel": "high",
+  "lastChangelogVersion": "0.70.5",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "deepseek-v4-pro",
+  "defaultThinkingLevel": "medium",
   "transport": "websocket",
   "compaction": {
     "enabled": true,
@@ -10,21 +10,21 @@
   },
   "steeringMode": "one-at-a-time",
   "extensions": [
+    "/Users/pabloflores/.pi/agent/extensions/lmstudio-provider.ts",
     "/Users/pabloflores/.pi/agent/extensions/colon-quit.ts",
     "/Users/pabloflores/.pi/agent/extensions/compaction-master.ts",
     "/Users/pabloflores/.pi/agent/extensions/fallback-manager.ts",
     "/Users/pabloflores/.pi/agent/extensions/large-message-handler.ts",
-    "/Users/pabloflores/.pi/agent/extensions/openrouter-rag.ts",
     "/Users/pabloflores/.pi/agent/extensions/always-caveman.ts",
     "/Users/pabloflores/.pi/agent/extensions/space-invaders.ts",
     "/Users/pabloflores/Documents/node_modules/pi-subagents"
   ],
   "packages": [
     "npm:pi-nvim",
-    "npm:pi-better-ctx",
     "npm:space-invaders",
     "npm:pi-subagents",
-    "npm:lsp-pi"
+    "npm:lsp-pi",
+    "npm:pi-local-rag"
   ],
   "subagents": {
     "agentOverrides": {
